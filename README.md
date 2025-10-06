@@ -1,0 +1,1 @@
+polymorphic malware that uses indirect syscalls with randomised obfuscation that does not appear in code since decryption//encryption is generated using claude, code only appears during compiling//execution
